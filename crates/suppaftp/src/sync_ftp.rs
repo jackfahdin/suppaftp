@@ -7,6 +7,9 @@ mod data_stream;
 mod tls;
 mod transfer_stream;
 
+#[cfg(all(test, feature = "secure", feature = "deprecated"))]
+mod implicit_socket_tests;
+
 use std::io::{BufRead, BufReader, Cursor, Read, copy};
 #[cfg(not(feature = "secure"))]
 use std::marker::PhantomData;
@@ -266,6 +269,25 @@ where
     ) -> FtpResult<Self> {
         debug!("Connecting to server (secure)");
         let stream = TcpStream::connect(addr).map_err(FtpError::ConnectionError)?;
+        Self::connect_secure_implicit_with_stream(stream, tls_connector, domain)
+    }
+
+    /// Establish implicit FTPS over an already connected and configured socket.
+    ///
+    /// Callers may apply their own connect deadline, cancellation, and socket read/write
+    /// timeouts before the TLS handshake and the server greeting. The connector is
+    /// retained for protected data connections, as with [`Self::connect_secure_implicit`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the TLS handshake or the initial server greeting fails.
+    #[cfg(all(feature = "secure", feature = "deprecated"))]
+    #[cfg_attr(docsrs, doc(cfg(all(feature = "secure", feature = "deprecated"))))]
+    pub fn connect_secure_implicit_with_stream(
+        stream: TcpStream,
+        tls_connector: impl TlsConnector<Stream = T> + Send + Sync + 'static,
+        domain: &str,
+    ) -> FtpResult<Self> {
         debug!("Established connection with server");
         debug!("TLS OK; initializing ssl stream");
         let stream = tls_connector
