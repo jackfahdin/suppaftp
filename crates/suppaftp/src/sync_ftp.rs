@@ -2,6 +2,8 @@
 //!
 //! This module contains the definition for all Sync implementation of suppaftp
 
+#[cfg(test)]
+mod abort_fence_tests;
 mod control;
 mod data_stream;
 mod tls;
@@ -737,6 +739,42 @@ where
         }
         debug!("Transfer aborted");
         Ok(())
+    }
+
+    /// Aborts a transfer and fences delayed completion replies with NOOP.
+    ///
+    /// A transfer may finish just before ABOR, producing both its own 226 and
+    /// an abort acknowledgement. Read through the NOOP's 200 before allowing
+    /// another operation on this control connection. At most three preceding
+    /// completion/abort replies are accepted; socket timeouts still apply.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unexpected reply, too many replies, or I/O
+    /// failure. The caller must discard the connection on error.
+    pub fn abort_with_fence(&mut self, transfer: TransferStream<T>) -> FtpResult<()> {
+        let data_stream = transfer.detach();
+        let mut cc = self.control();
+        cc.perform(Command::Abor)?;
+        drop(data_stream);
+        cc.data_connection_open = false;
+        cc.perform(Command::Noop)?;
+        for index in 0..4 {
+            let response = cc.read_response_in(&[
+                Status::ClosingDataConnection,
+                Status::TransferAborted,
+                Status::DataConnectionOpen,
+                Status::CommandOk,
+            ])?;
+            if response.status == Status::CommandOk {
+                return if index > 0 {
+                    Ok(())
+                } else {
+                    Err(FtpError::BadResponse)
+                };
+            }
+        }
+        Err(FtpError::BadResponse)
     }
 
     /// Sets the offset the next transfer resumes from: the amount of bytes to skip at the beginning of the file.

@@ -14,3 +14,17 @@ Validation on Windows: `cargo test -p suppaftp --features native-tls,deprecated
 implicit_socket_tests`; `cargo fmt --all -- --check`.
 The tests cover socket options at TLS setup and a stalled greeting without an
 external server or changes to the system certificate store.
+
+## Fence synchronous abort replies
+
+Add `abort_with_fence` for NyaTerm directory completion and transfer cleanup.
+A completed transfer can race ABOR and leave two 226 replies. Reading through
+one NOOP 200 fence consumes those replies before the next file operation.
+The reader accepts at most three completion/abort replies and retains the
+caller's socket deadlines. Unexpected or excessive replies reject reuse.
+The existing `abort` API and asynchronous implementations are unchanged.
+
+Validation on Linux: `cargo test -p suppaftp --features native-tls,deprecated
+abort_fence`; `cargo fmt --all -- --check`. Local scripted-server tests cover
+226, 426/226, 225, completed-transfer races, malformed and excessive replies,
+and a successful PWD immediately after the fence. No external FTP server is used.
